@@ -128,7 +128,7 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="halign">start</property>
-                        <property name="margin_start">6</property>
+                        <property name="margin_start">0</property>
                         <property name="label" translatable="yes">Video Preset</property>
                         <attributes>
                           <attribute name="weight" value="bold"/>
@@ -289,7 +289,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
                             <property name="halign">start</property>
-                            <property name="margin_start">6</property>
+                            <property name="margin_start">0</property>
                             <property name="label" translatable="yes">Size:</property>
                             <attributes>
                               <attribute name="weight" value="bold"/>
@@ -399,7 +399,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
                             <property name="halign">start</property>
-                            <property name="margin_start">6</property>
+                            <property name="margin_start">0</property>
                             <property name="label" translatable="yes">Aspect Ratio:</property>
                             <attributes>
                               <attribute name="weight" value="bold"/>
@@ -516,7 +516,7 @@
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
                             <property name="halign">start</property>
-                            <property name="margin_start">6</property>
+                            <property name="margin_start">0</property>
                             <property name="label" translatable="yes">Frame Rate:</property>
                             <attributes>
                               <attribute name="weight" value="bold"/>
@@ -591,7 +591,7 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="halign">start</property>
-                        <property name="margin_start">6</property>
+                        <property name="margin_start">0</property>
                         <property name="label" translatable="yes">Audio Preset</property>
                         <attributes>
                           <attribute name="weight" value="bold"/>
@@ -746,7 +746,7 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="halign">start</property>
-                        <property name="margin_start">6</property>
+                        <property name="margin_start">0</property>
                         <property name="label" translatable="yes">Format</property>
                         <attributes>
                           <attribute name="weight" value="bold"/>
@@ -762,7 +762,7 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="halign">start</property>
-                        <property name="margin_start">12</property>
+                        <property name="margin_start">0</property>
                         <property name="label" translatable="yes">Channels:</property>
                       </object>
                       <packing>
@@ -775,7 +775,7 @@
                         <property name="visible">True</property>
                         <property name="can_focus">False</property>
                         <property name="halign">start</property>
-                        <property name="margin_start">12</property>
+                        <property name="margin_start">0</property>
                         <property name="label" translatable="yes">Sample rate:</property>
                       </object>
                       <packing>
