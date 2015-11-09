@@ -37,13 +37,33 @@ from pitivi.utils.ui import NORMAL_FONT, PLAYHEAD_WIDTH, set_cairo_color, time_t
 
 HEIGHT = 25
 
-# A series of valid interval lengths in seconds.
-SCALES = (0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 3600)
+# Tuples of:
+# - an interval lengths in seconds,
+# - how the ticks should be displayed for this interval:
+#   (count per interval, height ratio) tuples.
+SCALES = (
+    (0.1, ((0.1, .1), (0.05, .5), (0.01, .25))),
+    (1, ((1, .1), (0.5, .5), (0.1, .25))),
+    (5, ((5, .5), (1, .25))),
+    (10, ((10, 1.0), (5, .5), (1, .25))),
+    (20, ((20, 1.0), (10, .5), (1, .25))),
+    (30, ((30, 1.0), (10, .5), (1, .25))),
+
+    # 1 minute.
+    (60, ((60, 1.0), (30, .5), )),
+    # 5 minutes.
+    (300, ((300, 1.0), (60, .5))),
+    # 10 minutes.
+    (600, ((600, 1.0), (300, .5), (60, .25))),
+    # 30 minutes.
+    (1800, ((1800, 1.0), (900, .5), (450, .25))),
+
+    # 1 hour.
+    (3600, ((3600, 1.0), (1800, .75), (900, .5))),
+)
 
 # The minimum distance between adjacent ticks.
 MIN_TICK_SPACING_PIXELS = 3
-# (count per interval, height ratio) tuples determining how the ticks appear.
-TICK_TYPES = ((1, 1.0), (2, 0.5), (10, .25))
 
 # For displaying the times a bit to the right.
 TIMES_LEFT_MARGIN_PIXELS = 3
@@ -210,9 +230,8 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
         Set the lowest scale based on project framerate
         """
         self.frame_rate = rate
-        self.ns_per_frame = float(1 / self.frame_rate) * Gst.SECOND
-        self.scales = (float(2 / rate), float(
-            5 / rate), float(10 / rate)) + SCALES
+        self.ns_per_frame = float(Gst.SECOND / self.frame_rate)
+        self.scales = (2 / rate, 5 / rate, 10 / rate) + SCALES
 
 # Drawing methods
 
@@ -227,26 +246,27 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
         context.set_font_face(NORMAL_FONT)
         context.set_font_size(NORMAL_FONT_SIZE)
 
-        spacing, scale = self._getSpacing(context)
+        spacing, interval_seconds, ticks = self._getSpacing(context)
         offset = self.pixbuf_offset % spacing
         self.drawFrameBoundaries(context)
-        self.drawTicks(context, offset, spacing)
-        self.drawTimes(context, offset, spacing, scale)
+        self.drawTicks(context, offset, spacing, interval_seconds, ticks)
+        self.drawTimes(context, offset, spacing, interval_seconds)
 
     def _getSpacing(self, context):
         textwidth = context.text_extents(time_to_string(0))[2]
         zoom = Zoomable.zoomratio
-        for scale in self.scales:
-            spacing = scale * zoom
+        for interval_seconds, ticks in SCALES:
+            spacing = interval_seconds * zoom
             if spacing >= textwidth * 1.5:
-                return spacing, scale
+                return spacing, interval_seconds, ticks
         raise Exception(
             "Failed to find an interval size for textwidth:%s, zoomratio:%s" %
             (textwidth, Zoomable.zoomratio))
 
-    def drawTicks(self, context, offset, spacing):
-        for count_per_interval, height_ratio in TICK_TYPES:
-            space = float(spacing) / count_per_interval
+    def drawTicks(self, context, offset, spacing, interval_seconds, ticks):
+        for tick_interval, height_ratio in ticks:
+            count_per_interval = interval_seconds / tick_interval
+            space = spacing / count_per_interval
             if space < MIN_TICK_SPACING_PIXELS:
                 break
             paintpos = 0.5 - offset
@@ -266,9 +286,9 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
         context.close_path()
         context.stroke()
 
-    def drawTimes(self, context, offset, spacing, scale):
+    def drawTimes(self, context, offset, spacing, interval_seconds):
         # figure out what the optimal offset is
-        interval = int(Gst.SECOND * scale)
+        interval = int(Gst.SECOND * interval_seconds)
         current_time = self.pixelToNs(self.pixbuf_offset)
         paintpos = TIMES_LEFT_MARGIN_PIXELS
         if offset > 0:
@@ -277,7 +297,7 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
 
         set_cairo_color(context, self._color_normal)
         y_bearing = context.text_extents("0")[1]
-        millis = scale < 1
+        millis = interval_seconds < 1
 
         def split(x):
             # Seven elements: h : mm : ss . mmm
