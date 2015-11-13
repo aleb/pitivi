@@ -212,6 +212,8 @@ class Marquee(Gtk.Box, Loggable):
 class Timeline(Gtk.EventBox, Zoomable, Loggable):
     """
     Contains the layer controls and the layers representation.
+
+    @type _project: L{pitivi.project.Project}
     """
 
     __gtype_name__ = "PitiviTimeline"
@@ -674,7 +676,7 @@ class Timeline(Gtk.EventBox, Zoomable, Loggable):
         x -= CONTROL_WIDTH
         x += self.hadj.get_value()
         position = max(0, self.pixelToNs(x))
-        self._project.seeker.seek(position)
+        self._project.pipeline.simple_seek(position)
 
     def _selectUnderMarquee(self):
         self.resetSelectionGroup()
@@ -1703,13 +1705,13 @@ class TimelineContainer(Gtk.Grid, Zoomable, Loggable):
         # shortcuts
         if event.keyval == Gdk.KEY_Left:
             if self._shiftMask:
-                self._seeker.seekRelative(0 - Gst.SECOND)
+                self._project.pipeline.seekRelative(0 - Gst.SECOND)
             else:
                 self._project.pipeline.stepFrame(self._framerate, -1)
             return True
         elif event.keyval == Gdk.KEY_Right:
             if self._shiftMask:
-                self._seeker.seekRelative(Gst.SECOND)
+                self._project.pipeline.seekRelative(Gst.SECOND)
             else:
                 self._project.pipeline.stepFrame(self._framerate, 1)
             return True
@@ -1759,7 +1761,6 @@ class TimelineContainer(Gtk.Grid, Zoomable, Loggable):
         """
         assert self._project is project
         if self._project:
-            self._seeker = self._project.seeker
             self.ruler.setPipeline(self._project.pipeline)
 
             self.ruler.setProjectFrameRate(self._project.videorate)
@@ -1786,7 +1787,6 @@ class TimelineContainer(Gtk.Grid, Zoomable, Loggable):
                 pass  # We were not connected no problem
 
             self.timeline._pipeline = None
-            self._seeker = None
 
         self.setProject(project)
 
