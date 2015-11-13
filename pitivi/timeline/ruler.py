@@ -187,7 +187,7 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
         self.debug("button pressed at x:%d", event.x)
         if event.button == 3 or (event.button == 1 and self.app.settings.leftClickAlsoSeeks):
             position = self.pixelToNs(event.x + self.pixbuf_offset)
-            self._seeker.seek(position, on_idle=True)
+            self._seeker.seek(position)
         return False
 
     def do_button_release_event(self, event):
@@ -203,7 +203,7 @@ class ScaleRuler(Gtk.DrawingArea, Zoomable, Loggable):
             seek_mask |= Gdk.ModifierType.BUTTON1_MASK
         if event.state & seek_mask:
             self.debug("motion at event.x %d", event.x)
-            self._seeker.seek(position, on_idle=True)
+            self._seeker.seek(position)
 
         human_time = beautify_length(position)
         cur_frame = int(position / self.ns_per_frame) + 1
