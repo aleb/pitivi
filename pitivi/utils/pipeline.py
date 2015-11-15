@@ -579,24 +579,39 @@ class Pipeline(GES.Pipeline, SimplePipeline):
         Seek backwards or forwards a certain amount of frames (frames_offset).
         This clamps the playhead to the project frames.
         """
-        try:
-            position = self.getPosition()
-        except PipelineError:
-            self.warning(
-                "Couldn't get position (you're framestepping too quickly), ignoring this request")
+        if not frames_offset:
+            return
+        if self.playing():
             return
 
-        cur_frame = int(
-            round(position * framerate.num / float(Gst.SECOND * framerate.denom), 2))
-        new_frame = cur_frame + frames_offset
-        new_pos = int(new_frame * Gst.SECOND * framerate.denom / framerate.num) + \
-            int((Gst.SECOND * framerate.denom / framerate.num) / 2)
-        Loggable.info(self, "From frame %d to %d at %f fps, seek to %s s",
+        if frames_offset > 0:
+            step_event = Gst.Event.new_step(format=Gst.Format.BUFFERS,
+                                            amount=frames_offset,
+                                            rate=1.0,
+                                            flush=True,
+                                            intermediate=False)
+            res = self.video_sink.send_event(step_event)
+            if not res:
+                self.warning("Failed to seek forward")
+        else:
+            try:
+                position = self.getPosition()
+            except PipelineError:
+                self.warning(
+                    "Couldn't get position (you're framestepping too quickly), ignoring this request")
+                return
+
+            cur_frame = int(
+                round(position * framerate.num / float(Gst.SECOND * framerate.denom), 2))
+            new_frame = cur_frame + frames_offset
+            new_pos = int(new_frame * Gst.SECOND * framerate.denom / framerate.num) + \
+                int((Gst.SECOND * framerate.denom / framerate.num) / 2)
+            self.info("From frame %d to %d at %f fps, seek to %s s",
                       cur_frame,
                       new_frame,
                       framerate.num / framerate.denom,
                       new_pos / float(Gst.SECOND))
-        self.simple_seek(new_pos)
+            self.simple_seek(new_pos)
 
     def simple_seek(self, position):
         if self._timeline.is_empty():
