@@ -125,7 +125,20 @@ def create_main_loop():
             raise Exception("Timed out after %s seconds" % timeout_seconds)
 
     mainloop.run = run
+
+    # Add a generic signal handler which quits the mainloop.
+    def done(*args, **kwargs):
+        mainloop.quit()
+
+    mainloop.done = done
     return mainloop
+
+
+@contextlib.contextmanager
+def created_main_loop():
+    mainloop = create_main_loop()
+    yield mainloop
+    mainloop.run()
 
 
 class TestCase(unittest.TestCase, Loggable):

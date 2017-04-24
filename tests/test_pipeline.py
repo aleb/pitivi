@@ -123,3 +123,51 @@ class TestPipeline(common.TestCase):
         self.assertEqual(pipe._recovery_state, SimplePipeline.RecoveryState.NOT_RECOVERING)
         self.assertFalse(pipe._busy_async)
         self.assertIsNone(pipe._next_seek)
+
+    def test_x(self):
+        """???."""
+        ges_timeline = GES.Timeline()
+        self.assertTrue(ges_timeline.add_track(GES.VideoTrack.new()))
+        ges_layer = ges_timeline.append_layer()
+        uri = common.get_sample_uri("tears_of_steel.webm")
+        asset = GES.UriClipAsset.request_sync(uri)
+        ges_clip1 = asset.extract()
+        self.assertTrue(ges_layer.add_clip(ges_clip1))
+        uri = common.get_sample_uri("1sec_simpsons_trailer.mp4")
+        asset = GES.UriClipAsset.request_sync(uri)
+        ges_clip2 = asset.extract()
+        self.assertTrue(ges_layer.add_clip(ges_clip2))
+
+        pipe = Pipeline(common.create_pitivi_mock())
+        pipe.set_timeline(ges_timeline)
+
+        pipe.pause()
+        with common.created_main_loop() as mainloop:
+            pipe.connect("async-done", mainloop.done)
+
+        # This happens because the viewer is connected to a
+        # a temporary pipeline for previewing the trimmed clip.
+        pipe.setState(Gst.State.NULL)
+
+        # Trim clip1 first time.
+        ges_clip1.props.duration = 279607912
+        pipe.commit_timeline()
+        # This happens because the viewer is connected back to
+        # the project pipeline.
+        pipe.pause()
+        with common.created_main_loop() as mainloop:
+            pipe.connect("async-done", mainloop.done)
+
+        # Seek.
+        pipe.simple_seek(182456010)
+        with common.created_main_loop() as mainloop:
+            pipe.connect("async-done", mainloop.done)
+
+        # Trim clip1 second time.
+        ges_clip1.props.duration = 210890713
+        pipe.commit_timeline()
+        # This happens because the viewer is connected back to
+        # the project pipeline.
+        pipe.pause()
+        with common.created_main_loop() as mainloop:
+            pipe.connect("async-done", mainloop.done)

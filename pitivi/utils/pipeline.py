@@ -127,7 +127,7 @@ class SimplePipeline(GObject.Object, Loggable):
 
         The instance will no longer be usable.
         """
-        self._removeWaitingForAsyncDoneTimeout()
+        self._removeWaitingForAsyncDoneTimeout("release")
         self.deactivatePositionListener()
         self._bus.disconnect_by_func(self._busMessageCb)
         self._bus.remove_signal_watch()
@@ -163,9 +163,9 @@ class SimplePipeline(GObject.Object, Loggable):
                 else:
                     timeout = MAX_SET_STATE_DURATION
 
-                self._addWaitingForAsyncDoneTimeout(timeout)
+                self._addWaitingForAsyncDoneTimeout("setState %s" % state, timeout)
         else:
-            self._removeWaitingForAsyncDoneTimeout()
+            self._removeWaitingForAsyncDoneTimeout("setState %s" % state)
 
         res = self._pipeline.set_state(state)
         if res == Gst.StateChangeReturn.FAILURE:
@@ -184,7 +184,7 @@ class SimplePipeline(GObject.Object, Loggable):
         """
         # No timeout
         change, state, pending = self._pipeline.get_state(timeout=0)
-        self.debug(
+        self.log(
             "change: %r, state: %r, pending: %r", change, state, pending)
         return state
 
@@ -297,20 +297,33 @@ class SimplePipeline(GObject.Object, Loggable):
 
     def _async_done_not_received_cb(self):
         self.error("we didn't get async done, this is a bug")
-        self._removeWaitingForAsyncDoneTimeout()
-        self._recover()
+        #self._removeWaitingForAsyncDoneTimeout("_async_done_not_received_cb")
+        #self._recover()
         return False
 
-    def _removeWaitingForAsyncDoneTimeout(self):
+    def _removeWaitingForAsyncDoneTimeout(self, reason):
         if not self._busy_async:
             return
+        if reason != "add":
+            import traceback
+            traceback.print_stack()
+        import datetime
+        delta_time = (datetime.datetime.now() - self.last_moment).total_seconds()
+        print ("-------REMOVE because: %s, after %s seconds, ID: %s" % (reason, delta_time, self._timeout_async_id))
         GLib.source_remove(self._timeout_async_id)
+        x = self._timeout_async_id
         self._timeout_async_id = 0
+        return x
 
-    def _addWaitingForAsyncDoneTimeout(self, timeout=WATCHDOG_TIMEOUT):
-        self._removeWaitingForAsyncDoneTimeout()
+    def _addWaitingForAsyncDoneTimeout(self, reason, timeout=WATCHDOG_TIMEOUT):
+        import traceback
+        traceback.print_stack()
+        x = self._removeWaitingForAsyncDoneTimeout("add")
         self._timeout_async_id = GLib.timeout_add_seconds(timeout,
                                                           self._async_done_not_received_cb)
+        print ("-------ADD   because: %s, ID: %s -> %s" % (reason, x, self._timeout_async_id))
+        import datetime
+        self.last_moment = datetime.datetime.now()
 
     @property
     def _busy_async(self):
@@ -360,7 +373,7 @@ class SimplePipeline(GObject.Object, Loggable):
         if not res:
             raise PipelineError(self.get_name() + " seek failed: " + str(position))
 
-        self._addWaitingForAsyncDoneTimeout()
+        self._addWaitingForAsyncDoneTimeout("simple seek %s" % format_ns(position))
 
         self.emit('position', position)
 
@@ -429,7 +442,7 @@ class SimplePipeline(GObject.Object, Loggable):
         elif message.type == Gst.MessageType.ASYNC_DONE:
             self.debug("Async done, ready for action")
             self.emit("async-done")
-            self._removeWaitingForAsyncDoneTimeout()
+            self._removeWaitingForAsyncDoneTimeout("_busMessageCb ASYNC_DONE")
             if self._recovery_state == self.RecoveryState.SEEKED_AFTER_RECOVERING:
                 self._recovery_state = self.RecoveryState.NOT_RECOVERING
                 self._attempted_recoveries = 0
@@ -557,7 +570,7 @@ class Pipeline(GES.Pipeline, SimplePipeline):
 
     def do_change_state(self, state):
         if state == Gst.StateChange.PAUSED_TO_READY:
-            self._removeWaitingForAsyncDoneTimeout()
+            self._removeWaitingForAsyncDoneTimeout("do_change_state")
 
         return GES.Pipeline.do_change_state(self, state)
 
@@ -619,7 +632,7 @@ class Pipeline(GES.Pipeline, SimplePipeline):
         if message.type == Gst.MessageType.ASYNC_DONE and\
                 self._commit_wanted:
             self.debug("Commiting now that ASYNC is DONE")
-            self._addWaitingForAsyncDoneTimeout()
+            self._addWaitingForAsyncDoneTimeout("_busMessageCb ASYNC_DONE but _commit_wanted")
             self.props.timeline.commit()
             self._commit_wanted = False
         else:
@@ -636,7 +649,7 @@ class Pipeline(GES.Pipeline, SimplePipeline):
             self._was_empty = False
             self.log("commit wanted")
         else:
-            self._addWaitingForAsyncDoneTimeout()
+            self._addWaitingForAsyncDoneTimeout("commit_timeline %s, %s, %s" % (self._busy_async, self._was_empty, is_empty))
             self.props.timeline.commit()
             self.debug("Commiting right now")
             self._was_empty = is_empty
@@ -646,7 +659,7 @@ class Pipeline(GES.Pipeline, SimplePipeline):
         if state >= Gst.State.PAUSED and self.props.timeline.is_empty():
             self.debug("No ASYNC_DONE will be emited on empty timelines")
             self._was_empty = True
-            self._removeWaitingForAsyncDoneTimeout()
+            self._removeWaitingForAsyncDoneTimeout("setState 2! %s %s" % (state, "empty"))
 
     def _rendering(self):
         mask = GES.PipelineFlags.RENDER | GES.PipelineFlags.SMART_RENDER
