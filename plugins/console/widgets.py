@@ -28,6 +28,7 @@ from gi.repository import Gdk
 from gi.repository import GLib
 from gi.repository import GObject
 from gi.repository import Gtk
+from gi.repository import Pango
 from utils import display_autocompletion
 from utils import FakeOut
 from utils import swap_std
@@ -53,9 +54,9 @@ class ConsoleWidget(Gtk.ScrolledWindow):
         self.add(self.__view)
 
         buf = self.__view.get_buffer()
-        self._normal = buf.create_tag("normal")
-        self._error = buf.create_tag("error")
-        self._command = buf.create_tag("command")
+        self.normal = buf.create_tag("normal")
+        self.error = buf.create_tag("error")
+        self.command = buf.create_tag("command")
 
         self._console = InteractiveConsole(namespace)
 
@@ -72,8 +73,8 @@ class ConsoleWidget(Gtk.ScrolledWindow):
         namespace["__history__"] = self.history
 
         # Set up hooks for standard output.
-        self.__stdout = FakeOut(self, self._normal)
-        self.__stderr = FakeOut(self, self._error)
+        self.__stdout = FakeOut(self, self.normal, sys.stdout.fileno())
+        self.__stderr = FakeOut(self, self.error, sys.stdout.fileno())
 
         # Signals.
         self.__view.connect("key-press-event", self.__key_press_event_cb)
@@ -82,6 +83,60 @@ class ConsoleWidget(Gtk.ScrolledWindow):
 
         # Prompt.
         self.prompt = sys.ps1
+
+        self._provider = Gtk.CssProvider()
+        self._css_values = {
+            "textview": {
+                "font-family": None,
+                "font-size": None,
+                "font-style": None,
+                "font-variant": None,
+                "font-weight": None
+            },
+            "textview > *": {
+                "color": None
+            }
+        }
+
+    def set_font(self, font_desc):
+        """Sets the font.
+
+        Args:
+            font (str): a PangoFontDescription as a string.
+        """
+        pango_font_desc = Pango.FontDescription.from_string(font_desc)
+        self._css_values["textview"]["font-family"] = pango_font_desc.get_family()
+        self._css_values["textview"]["font-size"] = "%dpt" % int(pango_font_desc.get_size() / Pango.SCALE)
+        self._css_values["textview"]["font-style"] = pango_font_desc.get_style().value_nick
+        self._css_values["textview"]["font-variant"] = pango_font_desc.get_variant().value_nick
+        self._css_values["textview"]["font-weight"] = int(pango_font_desc.get_weight())
+        self._apply_css()
+        self.error.set_property("font", font_desc)
+        self.command.set_property("font", font_desc)
+        self.normal.set_property("font", font_desc)
+
+    def set_color(self, color):
+        """Sets the color.
+
+        Args:
+            color (Gdk.RGBA): a color.
+        """
+        self._css_values["textview > *"]["color"] = color.to_string()
+        self._apply_css()
+
+    def _apply_css(self):
+        css = ""
+        for css_klass, props in self._css_values.items():
+            css += "%s {" % css_klass
+            for prop, value in props.items():
+                if value is not None:
+                    css += "%s: %s;" % (prop, value)
+            css += "} "
+        css = css.encode("UTF-8")
+        self._provider.load_from_data(css)
+        Gtk.StyleContext.add_provider(self.__view.get_style_context(),
+                                      self._provider,
+                                      Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def _process_command_line(self):
         # Get the marks.
@@ -97,7 +152,7 @@ class ConsoleWidget(Gtk.ScrolledWindow):
 
         # Apply a color to the line.
         input_line_iter = buf.get_iter_at_mark(input_line_mark)
-        buf.apply_tag(self._command, input_line_iter, end_iter)
+        buf.apply_tag(self.command, input_line_iter, end_iter)
         buf.insert(end_iter, "\n")
 
         with swap_std(self.__stdout, self.__stderr):
