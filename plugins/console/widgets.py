@@ -44,7 +44,7 @@ class ConsoleWidget(Gtk.ScrolledWindow):
     """
 
     # pylint: disable=too-many-instance-attributes
-    def __init__(self, namespace):
+    def __init__(self, namespace, welcome_message=None):
         Gtk.ScrolledWindow.__init__(self)
         self.__view = Gtk.TextView()
 
@@ -63,6 +63,11 @@ class ConsoleWidget(Gtk.ScrolledWindow):
         # Init prompt and first line.
         sys.ps1 = ">>> "
         sys.ps2 = "... "
+
+        if welcome_message is not None:
+            buf.insert_with_tags(buf.get_end_iter(), welcome_message,
+                                 self.normal)
+
         buf.create_mark("input-line", buf.get_end_iter(), True)
         buf.insert(buf.get_end_iter(), sys.ps1)
         buf.create_mark("after-prompt", buf.get_end_iter(), True)
