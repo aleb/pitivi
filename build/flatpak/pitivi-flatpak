@@ -227,24 +227,22 @@ class FlatpakRepos(FlatpakObject):
         for name, tmprepo in self.repos.items():
             if repo.url == tmprepo.url:
                 return tmprepo
-            elif repo.name == name:
+            if repo.name == name:
                 same_name = tmprepo
 
         if same_name:
-            if override:
-                self.flatpak("remote-modify", repo.name, "--url=" + repo.url,
-                             comment="Setting repo %s URL from %s to %s"
-                             % (repo.name, same_name.url, repo.url))
-                same_name.url = repo.url
-
-                return same_name
-            else:
+            if not override:
                 return None
-        else:
-            self.flatpak("remote-add", repo.name, "--from",
-                         repo.repo_file.name,
-                         comment="Adding repo %s" % repo.name)
 
+            self.flatpak("remote-modify", repo.name, "--url=" + repo.url,
+                         comment="Setting repo %s URL from %s to %s"
+                         % (repo.name, same_name.url, repo.url))
+            same_name.url = repo.url
+            return same_name
+
+        self.flatpak("remote-add", repo.name, "--from",
+                     repo.repo_file.name,
+                     comment="Adding repo %s" % repo.name)
         repo.repos = self
         return repo
 
@@ -448,7 +446,7 @@ class PitiviFlatpak:  # pylint: disable=too-many-instance-attributes
             self.update_all()
 
         if self.devel:
-            self.setup_dev_env()
+            self.setup_prefix()
 
         if self.check:
             self.run_in_sandbox("gst-validate-launcher",
@@ -466,7 +464,7 @@ class PitiviFlatpak:  # pylint: disable=too-many-instance-attributes
 
     def update_bundle(self):
         if not os.path.exists(self.prefix):
-            self.setup_dev_env()
+            self.setup_prefix()
 
         if not os.path.exists(self.repodir):
             os.mkdir(self.repodir)
@@ -503,7 +501,8 @@ class PitiviFlatpak:  # pylint: disable=too-many-instance-attributes
         except subprocess.CalledProcessError:
             self.exit(1)
 
-    def setup_dev_env(self):
+    def setup_prefix(self):
+        """Creates the sandbox."""
         if not os.path.exists(self.prefix) or self.update:
             self.install_all()
             Console.message("Building Pitivi %s and dependencies in %s",
@@ -528,10 +527,13 @@ class PitiviFlatpak:  # pylint: disable=too-many-instance-attributes
                 self.exit(1)
             subprocess.check_call(builder_args, cwd=self.scriptdir)
 
-            configure_args = ["./configure", "--prefix=/app", "--libdir=lib"]
-            self.run_in_sandbox(*configure_args, exit_on_failure=True,
+            meson_args = ["meson", "mesonbuild/", "--prefix=/app",
+                          "--libdir=lib", "-Ddisable_gtkdoc=true",
+                          "-Ddisable_doc=true"]
+            self.run_in_sandbox(*meson_args, exit_on_failure=True,
                                 cwd=self.topdir)
-            self.run_in_sandbox("make", exit_on_failure=True,
+            ninja_args = ["ninja", "-C", "mesonbuild/"]
+            self.run_in_sandbox(*ninja_args, exit_on_failure=True,
                                 cwd=self.topdir)
         else:
             Console.message("Using Pitivi prefix in %s", self.prefix)
