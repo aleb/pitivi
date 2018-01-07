@@ -115,10 +115,12 @@ def create_main_loop():
         timed_out = True
         mainloop.quit()
 
-    def run(timeout_seconds=5):
+    def run(timeout_seconds=5, until_empty=False):
         source = GLib.timeout_source_new_seconds(timeout_seconds)
         source.set_callback(timeout_cb)
         source.attach()
+        if until_empty:
+            GLib.idle_add(mainloop.quit)
         GLib.MainLoop.run(mainloop)
         source.destroy()
         if timed_out:
