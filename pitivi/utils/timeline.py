@@ -88,6 +88,7 @@ class Selection(GObject.Object, Loggable):
         GObject.Object.__init__(self)
         Loggable.__init__(self)
         self.selected = set()
+        self.last_selected_clip = None
 
     def setSelection(self, objs, mode):
         """Updates the current selection.

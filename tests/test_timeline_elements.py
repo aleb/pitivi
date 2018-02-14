@@ -19,16 +19,22 @@
 """Tests for the timeline.elements module."""
 # pylint: disable=protected-access,no-self-use,too-many-locals
 from unittest import mock
+from unittest import TestCase
 
 from gi.overrides import GObject
 from gi.repository import Gdk
 from gi.repository import GES
+from gi.repository import Gst
+from gi.repository import Gtk
 from matplotlib.backend_bases import MouseEvent
 
 from pitivi.timeline.elements import GES_TYPE_UI_TYPE
 from pitivi.undo.undo import UndoableActionLog
+from pitivi.utils.timeline import UNSELECT
+from pitivi.utils.timeline import Zoomable
+from tests.common import create_test_clip
+from tests.common import create_timeline_container
 from tests.test_timeline_timeline import BaseTestTimeline
-from tests import common
 
 
 class TestKeyframeCurve(BaseTestTimeline):
@@ -36,17 +42,17 @@ class TestKeyframeCurve(BaseTestTimeline):
 
     def test_keyframe_toggle(self):
         """Checks keyframes toggling at the playhead position."""
-        timeline_container = common.create_timeline_container()
+        timeline_container = create_timeline_container()
         timeline_container.app.action_log = UndoableActionLog()
         timeline = timeline_container.timeline
         ges_layer = timeline.ges_timeline.append_layer()
-        ges_clip1 = self.add_clip(ges_layer, 0)
-        ges_clip2 = self.add_clip(ges_layer, 10)
-        ges_clip3 = self.add_clip(ges_layer, 20, inpoint=100)
+        ges_clip1 = self.add_clip(ges_layer, 0, duration=2*Gst.SECOND)
+        ges_clip2 = self.add_clip(ges_layer, 10, duration=2*Gst.SECOND)
+        ges_clip3 = self.add_clip(ges_layer, 20, inpoint=100, duration=2*Gst.SECOND)
         # For variety, add TitleClip to the list of clips.
-        ges_clip4 = common.create_test_clip(GES.TitleClip)
+        ges_clip4 = create_test_clip(GES.TitleClip)
         ges_clip4.props.start = 30
-        ges_clip4.props.duration = 4.5
+        ges_clip4.props.duration = int(0.9 * Gst.SECOND)
         ges_layer.add_clip(ges_clip4)
 
         self.check_keyframe_toggle(ges_clip1, timeline_container)
@@ -54,10 +60,8 @@ class TestKeyframeCurve(BaseTestTimeline):
         self.check_keyframe_toggle(ges_clip3, timeline_container)
         self.check_keyframe_toggle(ges_clip4, timeline_container)
 
-        self.check_keyframe_ui_toggle(ges_clip1, timeline_container)
-        self.check_keyframe_ui_toggle(ges_clip2, timeline_container)
-        self.check_keyframe_ui_toggle(ges_clip3, timeline_container)
-        self.check_keyframe_ui_toggle(ges_clip4, timeline_container)
+        for ges_clip in [ges_clip1, ges_clip2, ges_clip3, ges_clip4]:
+            self.check_keyframe_ui_toggle(ges_clip, timeline_container)
 
     def check_keyframe_toggle(self, ges_clip, timeline_container):
         """Checks keyframes toggling on the specified clip."""
@@ -116,14 +120,16 @@ class TestKeyframeCurve(BaseTestTimeline):
             values = [item.timestamp for item in control_source.get_all()]
             self.assertEqual(values, [inpoint, inpoint + duration])
 
-    # pylint: disable=too-many-statements
     def check_keyframe_ui_toggle(self, ges_clip, timeline_container):
         """Checks keyframes toggling by click events."""
         timeline = timeline_container.timeline
 
+        start = ges_clip.props.start
+        start_px = Zoomable.nsToPixel(start)
         inpoint = ges_clip.props.in_point
         duration = ges_clip.props.duration
-        offsets = (1, int(duration / 2), int(duration) - 1)
+        duration_px = Zoomable.nsToPixel(duration)
+        offsets_px = (1, int(duration_px / 2), int(duration_px) - 1)
         timeline.selection.select([ges_clip])
 
         ges_video_source = ges_clip.find_track_element(None, GES.VideoSource)
@@ -134,8 +140,9 @@ class TestKeyframeCurve(BaseTestTimeline):
         values = [item.timestamp for item in control_source.get_all()]
         self.assertEqual(values, [inpoint, inpoint + duration])
 
-        # Add keyframes.
-        for offset in offsets:
+        # Add keyframes by simulating mouse clicks.
+        for offset_px in offsets_px:
+            offset = Zoomable.pixelToNs(start_px + offset_px) - start
             xdata, ydata = inpoint + offset, 1
             x, y = keyframe_curve._ax.transData.transform((xdata, ydata))
 
@@ -146,17 +153,23 @@ class TestKeyframeCurve(BaseTestTimeline):
                 y=y,
                 button=1
             )
-            event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
-            keyframe_curve._mpl_button_press_event_cb(event)
-            event.name = "button_release_event"
-            event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE)
-            keyframe_curve._mpl_button_release_event_cb(event)
+            keyframe_curve.translate_coordinates = \
+                mock.Mock(return_value=(start_px+offset_px, None))
+
+            with mock.patch.object(Gtk, "get_event_widget") as get_event_widget:
+                get_event_widget.return_value = keyframe_curve
+                event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
+                keyframe_curve._mpl_button_press_event_cb(event)
+                event.name = "button_release_event"
+                event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE)
+                keyframe_curve._mpl_button_release_event_cb(event)
 
             values = [item.timestamp for item in control_source.get_all()]
             self.assertIn(inpoint + offset, values)
 
-        # Remove keyframes.
-        for offset in offsets:
+        # Remove keyframes by simulating mouse double-clicks.
+        for offset_px in offsets_px:
+            offset = Zoomable.pixelToNs(start_px + offset_px) - start
             xdata, ydata = inpoint + offset, 1
             x, y = keyframe_curve._ax.transData.transform((xdata, ydata))
 
@@ -167,26 +180,30 @@ class TestKeyframeCurve(BaseTestTimeline):
                 y=y,
                 button=1
             )
-            event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
-            keyframe_curve._mpl_button_press_event_cb(event)
-            event.name = "button_release_event"
-            event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE)
-            keyframe_curve._mpl_button_release_event_cb(event)
-            event.name = "button_press_event"
-            event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
-            keyframe_curve._mpl_button_press_event_cb(event)
-            event.guiEvent = Gdk.Event.new(Gdk.EventType._2BUTTON_PRESS)
-            keyframe_curve._mpl_button_press_event_cb(event)
-            event.name = "button_release_event"
-            event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE)
-            keyframe_curve._mpl_button_release_event_cb(event)
+            keyframe_curve.translate_coordinates = \
+                mock.Mock(return_value=(start_px + offset_px, None))
+            with mock.patch.object(Gtk, "get_event_widget") as get_event_widget:
+                get_event_widget.return_value = keyframe_curve
+                event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
+                keyframe_curve._mpl_button_press_event_cb(event)
+                event.name = "button_release_event"
+                event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE)
+                keyframe_curve._mpl_button_release_event_cb(event)
+                event.name = "button_press_event"
+                event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_PRESS)
+                keyframe_curve._mpl_button_press_event_cb(event)
+                event.guiEvent = Gdk.Event.new(Gdk.EventType._2BUTTON_PRESS)
+                keyframe_curve._mpl_button_press_event_cb(event)
+                event.name = "button_release_event"
+                event.guiEvent = Gdk.Event.new(Gdk.EventType.BUTTON_RELEASE)
+                keyframe_curve._mpl_button_release_event_cb(event)
 
             values = [item.timestamp for item in control_source.get_all()]
             self.assertNotIn(inpoint + offset, values)
 
     def test_no_clip_selected(self):
         """Checks nothing happens when no clip is selected."""
-        timeline_container = common.create_timeline_container()
+        timeline_container = create_timeline_container()
         # Make sure this does not raise any exception
         timeline_container._keyframe_cb(None, None)
 
@@ -196,7 +213,7 @@ class TestVideoSource(BaseTestTimeline):
 
     def test_video_source_scaling(self):
         """Checks the size of the scaled clips."""
-        timeline_container = common.create_timeline_container()
+        timeline_container = create_timeline_container()
         timeline = timeline_container.timeline
         project = timeline.app.project_manager.current_project
 
@@ -252,7 +269,7 @@ class TestVideoSource(BaseTestTimeline):
 
     def test_rotation(self):
         """Checks the size of the clips flipped 90 degrees."""
-        timeline_container = common.create_timeline_container()
+        timeline_container = create_timeline_container()
         timeline = timeline_container.timeline
 
         clip = self.addClipsSimple(timeline, 1)[0]
@@ -296,8 +313,15 @@ class TestVideoSource(BaseTestTimeline):
         self.assertEqual(height, 400)
 
 
-class TestClip(common.TestCase):
+class TestClip(BaseTestTimeline):
     """Tests for the Clip class."""
+
+    def reset_clips_selection(self, timeline):
+        """Unselect all clips in the timeline."""
+        layers = timeline.ges_timeline.get_layers()
+        for layer in layers:
+            clips = layer.get_clips()
+            timeline.selection.setSelection(clips, UNSELECT);
 
     def test_clip_subclasses(self):
         """Checks the constructors of the Clip class."""
@@ -305,3 +329,135 @@ class TestClip(common.TestCase):
             ges_object = GObject.new(gtype)
             widget = widget_class(mock.Mock(), ges_object)
             self.assertEqual(ges_object.ui, widget, widget_class)
+
+    def test_shift_selection(self):
+        """Checks group clips selection using shift key."""
+        timeline_container = create_timeline_container()
+        timeline = timeline_container.timeline
+        ges_layer = timeline.ges_timeline.append_layer()
+        ges_clip1 = self.add_clip(ges_layer, 0*Gst.SECOND, duration=2*Gst.SECOND)
+        ges_clip2 = self.add_clip(ges_layer, 10*Gst.SECOND, duration=2*Gst.SECOND)
+        ges_clip3 = self.add_clip(ges_layer, 20*Gst.SECOND, duration=2*Gst.SECOND)
+        ges_clip4 = self.add_clip(ges_layer, 30*Gst.SECOND, duration=2*Gst.SECOND)
+
+        event = mock.Mock()
+        event.get_button.return_value = (True, 1)
+        timeline.get_parent()._shiftMask = True
+
+        # Simulate shift+click on first and second clip.
+        ges_clip1.ui._button_release_event_cb(None, event)
+        ges_clip2.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, True)
+        self.assertEqual(ges_clip2.selected._selected, True)
+        self.assertEqual(ges_clip3.selected._selected, False)
+        self.assertEqual(ges_clip4.selected._selected, False)
+        self.reset_clips_selection(timeline)
+        timeline.resetSelectionGroup()
+
+        # Simiulate shift+click on the first and fourth clip.
+        ges_clip1.ui._button_release_event_cb(None, event)
+        ges_clip4.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, True)
+        self.assertEqual(ges_clip2.selected._selected, True)
+        self.assertEqual(ges_clip3.selected._selected, True)
+        self.assertEqual(ges_clip4.selected._selected, True)
+        self.reset_clips_selection(timeline)
+        timeline.resetSelectionGroup()
+
+        # Simiulate shift+click on the first, fourth and second clip.
+        ges_clip1.ui._button_release_event_cb(None, event)
+        ges_clip4.ui._button_release_event_cb(None, event)
+        ges_clip2.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, True)
+        self.assertEqual(ges_clip2.selected._selected, True)
+        self.assertEqual(ges_clip3.selected._selected, False)
+        self.assertEqual(ges_clip4.selected._selected, False)
+        self.reset_clips_selection(timeline)
+        timeline.resetSelectionGroup()
+
+        # Simulate shift+click twice on the same clip.
+        ges_clip1.ui._button_release_event_cb(None, event)
+        ges_clip1.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, True)
+        self.assertEqual(ges_clip2.selected._selected, False)
+        self.assertEqual(ges_clip3.selected._selected, False)
+        self.assertEqual(ges_clip4.selected._selected, False)
+
+    def test_shift_ctrl_selection(self):
+        """Checks group clips selection using shift+ctrl keys"""
+        timeline_container = create_timeline_container()
+        timeline = timeline_container.timeline
+        ges_layer = timeline.ges_timeline.append_layer()
+        ges_clip1 = self.add_clip(ges_layer, 0*Gst.SECOND, duration=2*Gst.SECOND)
+        ges_clip2 = self.add_clip(ges_layer, 10*Gst.SECOND, duration=2*Gst.SECOND)
+        ges_clip3 = self.add_clip(ges_layer, 20*Gst.SECOND, duration=2*Gst.SECOND)
+        ges_clip4 = self.add_clip(ges_layer, 30*Gst.SECOND, duration=2*Gst.SECOND)
+        ges_clip5 = self.add_clip(ges_layer, 40*Gst.SECOND, duration=2*Gst.SECOND)
+
+        event = mock.Mock()
+        event.get_button.return_value = (True, 1)
+
+        # Simulate shift+click on first and third clip,
+        # and then ctrl+click on fifth clip.
+        timeline.get_parent()._shiftMask = True
+        ges_clip1.ui._button_release_event_cb(None, event)
+        ges_clip3.ui._button_release_event_cb(None, event)
+        timeline.get_parent()._shiftMask = False
+        timeline.get_parent()._controlMask = True
+        ges_clip5.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, True)
+        self.assertEqual(ges_clip2.selected._selected, True)
+        self.assertEqual(ges_clip3.selected._selected, True)
+        self.assertEqual(ges_clip4.selected._selected, False)
+        self.assertEqual(ges_clip5.selected._selected, True)
+        self.reset_clips_selection(timeline)
+        timeline.resetSelectionGroup()
+
+        # Simulate shift+click on first and third clip,
+        # then ctrl+click on second and fifth clip.
+        timeline.get_parent()._shiftMask = True
+        timeline.get_parent()._controlMask = False
+        ges_clip1.ui._button_release_event_cb(None, event)
+        ges_clip3.ui._button_release_event_cb(None, event)
+        timeline.get_parent()._shiftMask = False
+        timeline.get_parent()._controlMask = True
+        ges_clip2.ui._button_release_event_cb(None, event)
+        ges_clip5.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, True)
+        self.assertEqual(ges_clip2.selected._selected, False)
+        self.assertEqual(ges_clip3.selected._selected, True)
+        self.assertEqual(ges_clip4.selected._selected, False)
+        self.assertEqual(ges_clip5.selected._selected, True)
+        self.reset_clips_selection(timeline)
+        timeline.resetSelectionGroup()
+
+        # Simulate ctrl+click on first and third clip,
+        # and then shift+click on fifth clip.
+        ges_clip1.ui._button_release_event_cb(None, event)
+        ges_clip3.ui._button_release_event_cb(None, event)
+        timeline.get_parent()._shiftMask = True
+        timeline.get_parent()._controlMask = False
+        ges_clip5.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, False)
+        self.assertEqual(ges_clip2.selected._selected, False)
+        self.assertEqual(ges_clip3.selected._selected, True)
+        self.assertEqual(ges_clip4.selected._selected, True)
+        self.assertEqual(ges_clip5.selected._selected, True)
+        self.reset_clips_selection(timeline)
+        timeline.resetSelectionGroup()
+
+        # Simulate shift+click on third and fifth clip, ctrl+click on second clip,
+        # and then shift+click on first clip.
+        ges_clip3.ui._button_release_event_cb(None, event)
+        ges_clip5.ui._button_release_event_cb(None, event)
+        timeline.get_parent()._shiftMask = False
+        timeline.get_parent()._controlMask = True
+        ges_clip2.ui._button_release_event_cb(None, event)
+        timeline.get_parent()._shiftMask = True
+        timeline.get_parent()._controlMask = False
+        ges_clip1.ui._button_release_event_cb(None, event)
+        self.assertEqual(ges_clip1.selected._selected, True)
+        self.assertEqual(ges_clip2.selected._selected, True)
+        self.assertEqual(ges_clip3.selected._selected, False)
+        self.assertEqual(ges_clip4.selected._selected, False)
+        self.assertEqual(ges_clip5.selected._selected, False)

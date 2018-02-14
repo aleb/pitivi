@@ -1066,21 +1066,32 @@ class Clip(Gtk.EventBox, Zoomable, Loggable):
                 mode = SELECT_ADD
                 self.timeline.current_group.add(
                     self.ges_clip.get_toplevel_parent())
+                self.timeline.selection.last_selected_clip = self
             else:
                 self.timeline.current_group.remove(
                     self.ges_clip.get_toplevel_parent())
+                self.timeline.selection.last_selected_clip = None
                 mode = UNSELECT
-        elif not self.get_state_flags() & Gtk.StateFlags.SELECTED:
-            self.timeline.resetSelectionGroup()
-            self.timeline.current_group.add(
-                self.ges_clip.get_toplevel_parent())
-            self.app.gui.switchContextTab(self.ges_clip)
+        elif self.timeline.get_parent()._shiftMask:
+            num_clips_selected = len(self.timeline.current_group.get_children(False))
+            last_selected_clip = self.timeline.selection.last_selected_clip
+            if num_clips_selected == 0 or not last_selected_clip:
+                self.__select_current_clip()
+                clips = [self.ges_clip]
+            else:
+                self.timeline.resetSelectionGroup()
+                clips = self.__get_clips_in_between(last_selected_clip)
+                for clip in clips:
+                    self.timeline.current_group.add(clip.get_toplevel_parent())
         else:
-            self.timeline.resetSelectionGroup()
+            self.__select_current_clip()
 
         parent = self.ges_clip.get_parent()
         if parent == self.timeline.current_group or parent is None:
-            selection = [self.ges_clip]
+            if self.timeline.get_parent()._shiftMask:
+                selection = clips
+            else:
+                selection = [self.ges_clip]
         else:
             while True:
                 grandparent = parent.get_parent()
@@ -1171,6 +1182,54 @@ class Clip(Gtk.EventBox, Zoomable, Loggable):
         self.__disconnectFromChild(ges_timeline_element)
         self._remove_child(ges_timeline_element)
         self.updatePosition()
+
+    def __get_clips_in_between(self, last_selected_clip):
+        """Get all clips between the current clip and the last selected clip."""
+        layers = self.timeline.ges_timeline.get_layers()
+        cur_clip_layer_pos = layers.index(self.ges_clip.get_layer())
+        last_selected_clip_layer_pos = layers.index(
+                            last_selected_clip.ges_clip.get_layer())
+
+        if cur_clip_layer_pos >= last_selected_clip_layer_pos:
+            selected_layers_pos = range(last_selected_clip_layer_pos, cur_clip_layer_pos+1)
+        else:
+            selected_layers_pos = range(cur_clip_layer_pos, last_selected_clip_layer_pos+1)
+
+        # Get the interval in which the clips will be selected.
+        start, end = self.__get_interval(last_selected_clip)
+
+        clips = []
+        for layer_pos in selected_layers_pos:
+            cur_layer = layers[layer_pos]
+            clips.extend(cur_layer.get_clips_in_interval(start, end))
+
+        return clips
+
+    def __get_interval(self, last_selected_clip):
+        """Get the interval between the current clip and the last selected clip."""
+        cur_clip_start = self.ges_clip.props.start
+        cur_clip_end = cur_clip_start + self.ges_clip.props.duration
+        last_selected_clip_start = last_selected_clip.ges_clip.props.start
+        last_selected_clip_end = last_selected_clip_start + \
+            last_selected_clip.ges_clip.props.duration
+
+        if cur_clip_start <= last_selected_clip_start:
+            interval_start = cur_clip_start
+        else:
+            interval_start = last_selected_clip_start
+
+        if cur_clip_end >= last_selected_clip_end:
+            interval_end = cur_clip_end
+        else:
+            interval_end = last_selected_clip_end
+
+        return interval_start, interval_end
+
+    def __select_current_clip(self):
+        self.timeline.resetSelectionGroup()
+        self.timeline.selection.last_selected_clip = self
+        self.timeline.current_group.add(self.ges_clip.get_toplevel_parent())
+        self.app.gui.switchContextTab(self.ges_clip)
 
 
 class SourceClip(Clip):
